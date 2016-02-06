@@ -18,6 +18,11 @@ class ProgressWriterFile(ProgressWriter):
             f.write('%s\n' % (msg % args))
 
 
+class ProgressWriteStdout(ProgressWriter):
+    def write(self, msg, *args):
+        logger.debug(msg, *args)
+
+
 class Waiter(Thread):
     def __init__(self, name, buf, req, progress_writer, *args, **kwargs):
         Thread.__init__(self, *args, **kwargs)
@@ -61,14 +66,27 @@ def addNumber(status, a, b, *args, **kwargs):
 buf = createBufferWithWorker(6)
 
 reqs = []
-for i in xrange(10, 16):
+for i in xrange(10, 31):
     job = Job(addNumber, (15, i), {})
     reqs.append(buf.put(job, 100))
 
 # END request
 buf.put(None, 100)
 
+from datetime import datetime
+
+start = datetime.now()
+
+waiters = []
 for i, req in enumerate(reqs):
-    pgw = ProgressWriterFile('out/output_%s' % req)
+    pgw = ProgressWriteStdout()
     waiter = Waiter('Waiter_%s' % i, buf, req, pgw)
     waiter.start()
+    waiters.append(waiter)
+
+for waiter in waiters:
+    waiter.join()
+
+end = datetime.now()
+
+print 'elapsed time %s' % (end-start).seconds
