@@ -1,9 +1,9 @@
 Example usage:
 
 Clients needs to provide
-    * Specify # workers
-    * Function (status, args => FuncResult)
-    * Can submit anytime, can query result
+* Specify # workers
+* Function (status, args => FuncResult)
+* Can submit anytime, can query result
 
 Sample
 
