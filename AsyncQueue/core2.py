@@ -71,7 +71,7 @@ class Buffer(object):
 
             item = heapq.heappop(self.items)
             
-            priority, job_info = (item[1], item[2])
+            priority, job_info = (item[0], item[2])
             
             job_info.status.state = STATES.STARTED
 
