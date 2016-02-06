@@ -1,7 +1,6 @@
 from threading import Thread, Lock, Condition
 from uuid import uuid1
 import heapq
-import time
 import logging
 
 logging.basicConfig(level=logging.DEBUG)
@@ -22,7 +21,7 @@ class Status(object):
         self.state  = STATES.PENDING
         self.result = None
         self.error  = None
-        self.status = ''
+        self.status = 'HOLA'
 
     def getStatus(self):
         return self.status
@@ -36,6 +35,12 @@ class Job(object):
         self.function = func
         self.args     = func_args
         self.kwargs   = func_kwargs
+
+class FuncResult(object):
+    def __init__(self, result=None, error=None):
+        self.result = result
+        self.error  = error
+
 
 class JobInfo(object):
     def __init__(self, uid, job, condition, status):
@@ -60,15 +65,17 @@ class Buffer(object):
 
     def get(self):
         with self.lock:
-            if len(self.items) == 0:
-                self.condition.wait()
             
-            item     = heapq.heappop(self.items)
-            job_info = item[2]
+            while len(self.items) == 0:
+                self.condition.wait()
+
+            item = heapq.heappop(self.items)
+            
+            priority, job_info = (item[1], item[2])
             
             job_info.status.state = STATES.STARTED
 
-            return job_info
+            return (priority, job_info)
 
     def put(self, job, priority):
         with self.lock:
@@ -83,7 +90,7 @@ class Buffer(object):
             self.items_index[uid] = job_info
             
             if len(self.items) == 1:
-                self.condition.notify()
+                self.condition.notifyAll()
 
             self._counter += 1
             
@@ -115,72 +122,59 @@ class Buffer(object):
 
 
 class Worker(Thread):
-    def __init__(self, name, buffer, *args, **kwargs):
+    def __init__(self, name, buf, *args, **kwargs):
         Thread.__init__(self, *args, **kwargs)
         
         self.name   = name
-        self.buffer = buffer
+        self.buffer = buf
 
     def run(self):
         while True:
-            job_info = self.buffer.get()
+            priority, job_info = self.buffer.get()
+
             job      = job_info.job
             status   = job_info.status
 
             if job is None:
+                logger.debug('"%s" is shutting down.', self.name)
+
+                self.buffer.put(job, priority)
                 break
 
             try:
-                status.result, status.error = job.function(status, *job.args, **job.kwargs)
+                res = job.function(status, *job.args, **job.kwargs)
+                
+                if isinstance(res, FuncResult):
+                    status.result = res.result
+                    status.error  = res.error
+                else:
+                    logger.debug('Provided function does not return required type. '
+                                 'Parsing into default form')
+                    
+                    status.result = res
+                    status.error  = None
             except:
                 logger.debug('Something went wrong', exc_info=True)
             
             self.buffer.notifyDone(job_info.uid)
 
 
+def createBufferWithWorker(worker_count=1):
+    buf = Buffer()
+
+    for count in xrange(1, worker_count + 1):
+        worker = Worker('Worker-%s' % count, buf)
+        worker.start()
+
+    return buf
+
+
+class ProgressWriter(object):
+    def write(self, msg, *args):
+        logger.debug(msg, *args)
+
+
+# ---------------------------------------------------
+
 # Input  : status + args/kwargs
-# Output : (result, error)
-
-def addNumber(status, a, b, *args, **kwargs):
-    
-    status.setStatus('Installing Part A')
-    time.sleep(3)
-    status.setStatus('Installing Part B')
-    time.sleep(3)
-    status.setStatus('Combining Part A and B')
-    time.sleep(3)
-    status.setStatus('Calculating')
-    time.sleep(3)
-
-    result = a + b
-    error  = None
-    
-    return (result, error)
-
-
-buf = Buffer()
-
-worker = Worker('Worker', buf)
-worker.start()
-
-reqs = []
-for i in xrange(10, 16):
-    job = Job(addNumber, (15, i), {})
-    reqs.append(buf.put(job, 100))
-
-buf.put(None, 100)
-
-for req in reqs:
-    logger.debug('Check result of "%s"', req)
-    
-    log_buf = set()
-    done, msg = buf.isFinished(req, 1)
-    while not done:
-        if msg not in log_buf:
-            logger.debug(' ... %s', msg)
-        log_buf.add(msg)
-        done, msg = buf.isFinished(req, 1)
-
-    res = buf.getResult(req)
-    logger.debug('Result is %s', str(res))
-
+# Output : FuncResult(result, error)

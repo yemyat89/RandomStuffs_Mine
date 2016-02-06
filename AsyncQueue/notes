@@ -1,0 +1,7 @@
+Buffer
+    - # workers
+
+Clients
+    - Specify # workers
+    - Function (status, args => FunResult)
+    - Can submit anytime, can query result
