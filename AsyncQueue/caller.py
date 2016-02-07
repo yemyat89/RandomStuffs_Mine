@@ -71,7 +71,7 @@ for i in xrange(10, 25):
     reqs.append(buf.put(job, 100))
 
 #buf.waitUntilAllDone()
-buf.exitGracefully()
+buf.exitGracefully(timeout=2)
 
 waiters = []
 for i, req in enumerate(reqs):

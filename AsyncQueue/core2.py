@@ -61,6 +61,7 @@ class Buffer(object):
         
         self.items       = []
         self.items_index = {}
+        self.started     = {}
         
         self.id_gen      = uuid1
 
@@ -79,6 +80,7 @@ class Buffer(object):
             priority, job_info = (item[0], item[2])
             
             job_info.status.state = STATES.STARTED
+            self.started[job_info.uid] = job_info
 
             return (priority, job_info)
 
@@ -105,7 +107,18 @@ class Buffer(object):
         with self.lock:
             job_info = self.items_index[uid]
             job_info.status.state = STATES.COMPLETE
+            print len(self.started)
+            del self.started[uid]
+            print len(self.started)
             job_info.condition.notifyAll()
+
+    def getStartedYetNotified(self):
+        with self.lock:
+            res = {}
+            for k, v in self.started.iteritems():
+                if v.job is not None:
+                    res[k] = v
+            return res
 
     def isEmpty(self):
         return (len(self.items) == 0)
@@ -113,8 +126,8 @@ class Buffer(object):
     def cancel(self, uid):
         with self.lock:
             job_info = self.items_index[uid]
-            if job_info.status.state != STATES.STARTED:
-                raise ValueError('Cannot cancel')
+            #if job_info.status.state != STATES.STARTED:
+            #    raise ValueError('Cannot cancel')
             
             job_info.status.state = STATES.CANCELLED
             job_info.status.setStatus('Job cancelled.')
@@ -205,7 +218,7 @@ class BufferWithWorker(object):
     def waitUntilAllDone(self):
         self.exitGracefully(after_current=False)
 
-    def exitGracefully(self, after_current=True):
+    def exitGracefully(self, after_current=True, timeout=None):
         self.open = False
 
         if after_current:
@@ -217,11 +230,19 @@ class BufferWithWorker(object):
             self.buf.put(None, priority)
 
         for worker in self.workers:
-            worker.join()
+            worker.join(timeout)
+            if worker.isAlive():
+                break
 
+        remains = self.buf.getStartedYetNotified().keys()
+        if remains:
+            logger.debug('Some in current. Killing %s', len(remains))
         while not self.buf.isEmpty():
             _, job_info = self.buf.get()
-            self.buf.cancel(job_info.uid)
+            remains.append(job_info.uid)
+
+        for uid in remains:
+            self.buf.cancel(uid)
 
 
 class ProgressWriter(object):
