@@ -1,5 +1,5 @@
 from threading import Thread
-from core2 import (createBufferWithWorker, Job, FuncResult, ProgressWriter)
+from core2 import (BufferWithWorker, Job, FuncResult, ProgressWriter)
 import time
 import logging
 
@@ -63,19 +63,15 @@ def addNumber(status, a, b, *args, **kwargs):
     return FuncResult(result=result, error=error)
 
 
-buf = createBufferWithWorker(6)
+buf = BufferWithWorker(6)
 
 reqs = []
-for i in xrange(10, 31):
+for i in xrange(10, 25):
     job = Job(addNumber, (15, i), {})
     reqs.append(buf.put(job, 100))
 
-# END request
-buf.put(None, 100)
-
-from datetime import datetime
-
-start = datetime.now()
+#buf.waitUntilAllDone()
+buf.exitGracefully()
 
 waiters = []
 for i, req in enumerate(reqs):
@@ -83,10 +79,3 @@ for i, req in enumerate(reqs):
     waiter = Waiter('Waiter_%s' % i, buf, req, pgw)
     waiter.start()
     waiters.append(waiter)
-
-for waiter in waiters:
-    waiter.join()
-
-end = datetime.now()
-
-print 'elapsed time %s' % (end-start).seconds

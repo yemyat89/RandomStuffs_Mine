@@ -2,6 +2,7 @@ from threading import Thread, Lock, Condition
 from uuid import uuid1
 import heapq
 import logging
+import sys
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('ymt.queue')
@@ -13,7 +14,7 @@ class Enum(set):
         raise AttributeError
 
 
-STATES = Enum(['PENDING', 'STARTED', 'COMPLETE'])
+STATES = Enum(['PENDING', 'STARTED', 'COMPLETE', 'CANCELLED'])
 
 
 class Status(object):
@@ -21,7 +22,7 @@ class Status(object):
         self.state  = STATES.PENDING
         self.result = None
         self.error  = None
-        self.status = 'HOLA'
+        self.status = 'Pending in queue.'
 
     def getStatus(self):
         return self.status
@@ -63,6 +64,10 @@ class Buffer(object):
         
         self.id_gen      = uuid1
 
+    def getHighestPriority(self):
+        with self.lock:
+            return self.items[0][0] if self.items else None
+
     def get(self):
         with self.lock:
             
@@ -79,7 +84,7 @@ class Buffer(object):
 
     def put(self, job, priority):
         with self.lock:
-            
+
             uid       = str(self.id_gen())
             condition = Condition(self.lock)
             status    = Status()
@@ -105,18 +110,31 @@ class Buffer(object):
     def isEmpty(self):
         return (len(self.items) == 0)
 
+    def cancel(self, uid):
+        with self.lock:
+            job_info = self.items_index[uid]
+            if job_info.status.state != STATES.STARTED:
+                raise ValueError('Cannot cancel')
+            
+            job_info.status.state = STATES.CANCELLED
+            job_info.status.setStatus('Job cancelled.')
+
     def isFinished(self, uid, timeout=None):
         with self.lock:
             job_info = self.items_index[uid]
-            if job_info.status.state != STATES.COMPLETE:
+            
+            if (job_info.status.state != STATES.COMPLETE and job_info.status.state != STATES.CANCELLED):
                 job_info.condition.wait(timeout)
-                return (job_info.status.state == STATES.COMPLETE, job_info.status.getStatus())
+                
+                return (job_info.status.state == STATES.COMPLETE or job_info.status.state == STATES.CANCELLED, 
+                        job_info.status.getStatus())
+        
         return (True, job_info.status.getStatus())
 
     def getResult(self, uid):
         job_info = self.items_index[uid]
         
-        assert job_info.status.state == STATES.COMPLETE, 'Job (id=%s) not complete yet' % uid
+        assert (job_info.status.state == STATES.COMPLETE or job_info.status.state == STATES.CANCELLED), 'Job (id=%s) not complete yet' % uid
 
         return (job_info.status.result, job_info.status.error)
 
@@ -127,6 +145,8 @@ class Worker(Thread):
         
         self.name   = name
         self.buffer = buf
+
+        self.daemon = True
 
     def run(self):
         while True:
@@ -159,14 +179,49 @@ class Worker(Thread):
             self.buffer.notifyDone(job_info.uid)
 
 
-def createBufferWithWorker(worker_count=1):
-    buf = Buffer()
+class BufferWithWorker(object):
 
-    for count in xrange(1, worker_count + 1):
-        worker = Worker('Worker-%s' % count, buf)
-        worker.start()
+    def __init__(self, worker_count):
+        self.buf          = Buffer()
+        self.worker_count = worker_count
+        self.workers      = []
+        self.open         = True
 
-    return buf
+        for count in xrange(1, worker_count + 1):
+            self.workers.append(Worker('Worker-%s' % count, self.buf))
+            self.workers[-1].start()
+
+    def put(self, job, priority):
+        if not self.open:
+            raise ValueError('Already terminating')
+        return self.buf.put(job, priority)
+
+    def isFinished(self, uid, timeout=None):
+        return self.buf.isFinished(uid, timeout)
+
+    def getResult(self, uid):
+        return self.buf.getResult(uid)
+
+    def waitUntilAllDone(self):
+        self.exitGracefully(after_current=False)
+
+    def exitGracefully(self, after_current=True):
+        self.open = False
+
+        if after_current:
+            priority = self.buf.getHighestPriority() - 1
+        else:
+            priority = sys.maxint
+
+        for _ in xrange(self.worker_count):
+            self.buf.put(None, priority)
+
+        for worker in self.workers:
+            worker.join()
+
+        while not self.buf.isEmpty():
+            _, job_info = self.buf.get()
+            self.buf.cancel(job_info.uid)
 
 
 class ProgressWriter(object):
