@@ -25,6 +25,12 @@ if __name__ == '__main__':
         a = A()
         a.start()
 
+        assert (1==2 or 
+                3==2), \
+            'Are see jas ' + \
+            'ksa wolloeands iosammdsa ' +\
+            'oms lkdas kldksa?'
+
         while a.isAlive():
             a.join(2)
     except KeyboardInterrupt:

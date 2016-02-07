@@ -136,10 +136,13 @@ class Buffer(object):
         with self.lock:
             job_info = self.items_index[uid]
             
-            if (job_info.status.state != STATES.COMPLETE and job_info.status.state != STATES.CANCELLED):
+            if (job_info.status.state != STATES.COMPLETE and 
+                job_info.status.state != STATES.CANCELLED):
+                
                 job_info.condition.wait(timeout)
                 
-                return (job_info.status.state == STATES.COMPLETE or job_info.status.state == STATES.CANCELLED, 
+                return ((job_info.status.state == STATES.COMPLETE or 
+                        job_info.status.state == STATES.CANCELLED), 
                         job_info.status.getStatus())
         
         return (True, job_info.status.getStatus())
@@ -147,7 +150,9 @@ class Buffer(object):
     def getResult(self, uid):
         job_info = self.items_index[uid]
         
-        assert (job_info.status.state == STATES.COMPLETE or job_info.status.state == STATES.CANCELLED), 'Job (id=%s) not complete yet' % uid
+        assert (job_info.status.state == STATES.COMPLETE or 
+                job_info.status.state == STATES.CANCELLED), \
+                'Job (id=%s) not complete yet' % uid
 
         return (job_info.status.result, job_info.status.error)
 
